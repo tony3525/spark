@@ -24,22 +24,9 @@ import org.apache.spark.graphx.util.GraphGenerators
 
 object GridHITS {
   def apply(nRows: Int, nCols: Int, nIter: Int): Seq[(VertexId, Double)] = {
-    val inNbrs = Array.fill(nRows * nCols)(collection.mutable.MutableList.empty[Int])
-    val outDegree = Array.fill(nRows * nCols)(0)
     // Convert row column address into vertex ids (row major order)
     def sub2ind(r: Int, c: Int): Int = r * nCols + c
-    // Make the grid graph
-    for (r <- 0 until nRows; c <- 0 until nCols) {
-      val ind = sub2ind(r, c)
-      if (r + 1 < nRows) {
-        outDegree(ind) += 1
-        inNbrs(sub2ind(r + 1, c)) += ind
-      }
-      if (c + 1 < nCols) {
-        outDegree(ind) += 1
-        inNbrs(sub2ind(r, c + 1)) += ind
-      }
-    }
+    
     // compute the authority score and hub score
     // var pr = Array.fill(nRows * nCols)(resetProb)
     var auth = Array.fill(nRows * nCols)(1.0)
@@ -112,13 +99,12 @@ class HITSSuite extends SparkFunSuite with LocalSparkContext {
       val gridGraph = GraphGenerators.gridGraph(sc, rows, cols).cache()
 
       val pairs = gridGraph.staticHITS(numIter).vertices.cache()
-      val dynamicRanks = gridGraph.pageRank(tol, resetProb).vertices.cache()
       val referencePairs = VertexRDD(
         sc.parallelize(GridHITS(rows, cols, numIter))).cache()
 
       assert(compareScores(pairs, referencePairs) < errorTol)
       
     }
-  } // end of Grid PageRank
+  } 
   
 }
