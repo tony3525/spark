@@ -420,7 +420,7 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
    * containing the authority scores and hub scores.
    *
    */
-  def staticHITS(numIter: Int): Graph[(Double, Double), Double] = {
+  def staticHITS(numIter: Int): Graph[(Double, Double), ED] = {
     HITS.runWithOptions(graph, numIter)
   }
 
