@@ -415,7 +415,6 @@ class GraphOps[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]) extends Seriali
   }
 
 
-
   /**
    * Run HITS for a fixed number of iterations returning a graph with vertex attributes
    * containing the authority scores and hub scores.

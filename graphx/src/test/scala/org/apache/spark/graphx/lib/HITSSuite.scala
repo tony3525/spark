@@ -22,89 +22,37 @@ import org.apache.spark.graphx._
 import org.apache.spark.graphx.util.GraphGenerators
 
 
-object GridHITS {
-  def apply(nRows: Int, nCols: Int, nIter: Int): Seq[(VertexId, Double)] = {
-    // Convert row column address into vertex ids (row major order)
-    def sub2ind(r: Int, c: Int): Int = r * nCols + c
-    
-    // compute the authority score and hub score
-    // var pr = Array.fill(nRows * nCols)(resetProb)
-    var auth = Array.fill(nRows * nCols)(1.0)
-    var hub = Array.fill(nRows * nCols)(1.0)
-    for (iter <- 0 until nIter) {
-      val oldAuth = auth
-      val oldHub = hub
-      // pr = new Array[Double](nRows * nCols)
-      auth = new Array[Double](nRows*nCols)
-      hub = new Array[Double](nRows*nCols)
 
-      // Calculate the authority scores
-      for (r <- 0 until nRows; c <- 0 until nCols) {
-        val ind = sub2ind(r,c)
-	if (r+1 < nRows) { auth(sub2ind(r+1,c)) += oldhub(sub2ind(r,c))}
-	if (c+1 < nCols) { auth(sub2ind(r,c+1)) += oldhub(sub2ind(r,c))}
-	      
-      }
-      // Calculate the norm
-      val authNorm = 0
-      for (ind <- 0 until (nRows * nCols)){
-        authNorm += auth(ind) * auth(ind)
-      }
-      authNorm = math.sqrt(authNorm)
 
-      // Scale the authority score
-      for (ind <- 0 until (nRows * nCols)){
-        auth(ind) /= authNorm
-      }
-
-      // Calculate the hub scores
-      for (r <- 0 until nRows; c <- 0 until nCols) {
-        val ind = sub2ind(r,c)
-	if (r+1 < nRows) { hub(sub2ind(r,c)) += auth(sub2ind(r+1,c))}
-	if (c+1 < nCols) { hub(sub2ind(r,c)) += auth(sub2ind(r,c+1))}      
-      }
-      // Calculate the norm
-      val hubNorm = 0
-      for (ind <- 0 until (nRows * nCols)){
-        hubNorm += hub(ind) * hub(ind)
-      }
-      hubNorm = math.sqrt(hubNorm)
-
-      // Scale the hub score
-      for (ind <- 0 until (nRows * nCols)){
-        hub(ind) /= hubNorm
-      }
-
-    }
-
-  }
-
-}
 
 
 class HITSSuite extends SparkFunSuite with LocalSparkContext {
 
-  def compareScores(a: VertexRDD[(Double, Double)], b: VertexRDD[(Double, Double)]): Double = {
-    a.leftJoin(b) { case (id, a, bOpt) => (a._1 - bOpt._1.getOrElse(0.0)) * (a._1 - bOpt._1.getOrElse(0.0)) + (a._2 - bOpt._2.getOrElse(0.0)) * (a._2 - bOpt._2.getOrElse(0.0)) }
-      .map { case (id, error) => error }.sum()
-  }
-
-  test("Grid HITS") {
+  test("Star HITS") {
     withSpark { sc =>
-      val rows = 10
-      val cols = 10
-      val tol = 0.0001
-      val numIter = 50
-      val errorTol = 1.0e-5
-      val gridGraph = GraphGenerators.gridGraph(sc, rows, cols).cache()
+      val nVertices = 100
+      val starGraph = GraphGenerators.starGraph(sc, nVertices).cache()
+      val scores1 = starGraph.staticHITS(numIter = 1).vertices
+      val scores2 = starGraph.staticHITS(numIter = 10).vertices.cache()
 
-      val pairs = gridGraph.staticHITS(numIter).vertices.cache()
-      val referencePairs = VertexRDD(
-        sc.parallelize(GridHITS(rows, cols, numIter))).cache()
+      // Static HITS should only take 1 iterations to converge.
+      // The scores from step 1 and step 10 should be the same
+      val notMatching = scores1.innerZipJoin(scores2) { (vid, pr1, pr2) =>
+        if (math.abs(pr1._1 - pr2._1) > 1.0E-10 || math.abs(pr1._2 - pr2._2) > 1.0E-10) 1 else 0
+      }.map { case (vid, test) => test }.sum()
+      assert(notMatching === 0)
 
-      assert(compareScores(pairs, referencePairs) < errorTol)
-      
+      // The authority-hub score pairs after any number of iterations should be
+      // vertex 0 (center) : (1.0, 0.0)
+      // vertex i (i > 0)  : (0.0, 1.0/sqrt(nVertices-1))
+      val staticErrors = scores2.map { case (vid, pr) =>
+        val correct = (vid > 0 && math.abs(pr._1) < 1.0E-10
+          && math.abs(pr._2 - math.sqrt(1.0/(nVertices - 1))) < 1.0E-10) ||
+          (vid == 0L && math.abs(pr._1 - 1.0) < 1.0E-10 && math.abs(pr._2) < 1.0E-10)
+        if (!correct) 1 else 0
+      }
+      assert(staticErrors.sum === 0)
+
     }
-  } 
-  
+  } // end of test Star HITS
 }

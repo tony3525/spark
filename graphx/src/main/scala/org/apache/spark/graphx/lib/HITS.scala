@@ -40,49 +40,53 @@ object HITS extends Logging {
  * @param numIter the number of iterations of HITS to run
  *
  * @return the graph containing with each vertex containing
- * the authority score and hub score
+ *         the authority score and hub score
  *
  */
 
 def runWithOptions[VD: ClassTag, ED: ClassTag](
-    graph: Graph[VD, ED], numIter: Int):Graph[(Double, Double), Double]=
+    graph: Graph[VD, ED], numIter: Int): Graph[(Double, Double), Double] =
 {
-  require(numIter > 0, s"Number of iterations must be greater than 0," +s"but got ${numIter}")
+  require(numIter > 0, s"Number of iterations must be greater than 0," + s"but got ${numIter}")
 
   // Initialize the HITS graph with each vertex attribute having
   // authority score 1.0 and hub score 1.0.  Edge attribute is not neeed
-  
+
   var hitsGraph : Graph[(Double, Double), Double] = graph
-    // Set the weight on the edges based on the degree (not necessary)
+    // Set the weight on the edges based on the degree
     .mapTriplets( e => 1.0, TripletFields.Src )
     // Set the vertex attributes to the initial value:
-    // authority = 1.0, hub = 1.0 
-    .mapVertices { (id, attr) => (1.0,1.0)}
+    // authority = 1.0, hub = 1.0
+    .mapVertices { (id, attr) => (1.0, 1.0)}
   var iteration = 0
-  
+
   var prevHitsGraph: Graph[(Double, Double), Double] = null
   while (iteration < numIter) {
     hitsGraph.cache()
 
     prevHitsGraph = hitsGraph
-    // Update authority scores
+    // add up the hub scores of sources of incoming edges
     val authUpdates = hitsGraph.aggregateMessages[Double](
       ctx => ctx.sendToDst(ctx.srcAttr._2), _ + _)
 
+    // make the authority scores 0
+    hitsGraph = hitsGraph.mapVertices { (id, attr) => (0.0, attr._2)}
     hitsGraph = hitsGraph.joinVertices(authUpdates) {
-      (id, oldValue, msgSum) => (msgSum , oldValue._2)
+      (id, oldValue, msgSum) => (msgSum, oldValue._2)
     }.cache()
-    
+
     // Calculate the norm of authority scores
     val square_auth = hitsGraph.vertices.map(v => v._2._1 * v._2._1).reduce((a, b) => a + b)
     val norm_auth = math.sqrt(square_auth)
 
     // normalize authority scores
     hitsGraph = hitsGraph.mapVertices{ (id, attr) => (attr._1 / norm_auth, attr._2)}
-  
-    // Calculate hub scores
+
+    // add up the authority scores of destinations of outgoing edges
     val hubUpdates = hitsGraph.aggregateMessages[Double](
       ctx => ctx.sendToSrc(ctx.dstAttr._1), _ + _)
+    // make the hub scores 0
+    hitsGraph = hitsGraph.mapVertices { (id, attr) => (attr._1, 0.0)}
     hitsGraph = hitsGraph.joinVertices(hubUpdates) {
       (id, oldValue, msgSum) => (oldValue._1, msgSum)
     }
@@ -91,13 +95,13 @@ def runWithOptions[VD: ClassTag, ED: ClassTag](
     val square_hub = hitsGraph.vertices.map(v => v._2._2 * v._2._2).reduce((a, b) => a + b)
     val norm_hub = math.sqrt(square_hub)
 
-    // normalize hub scores
-    hitsGraph = hitsGraph.mapVertices{ (id, attr) => (attr._1, attr._2 / norm_hub)}  
-    
+    // normalize hub score
+    hitsGraph = hitsGraph.mapVertices{ (id, attr) => (attr._1, attr._2 / norm_hub)}
+
     logInfo(s"HITS finished iteration $iteration.")
     prevHitsGraph.vertices.unpersist(false)
     prevHitsGraph.edges.unpersist(false)
-  
+
     iteration += 1
   }
   hitsGraph
