@@ -67,19 +67,15 @@ object HITS extends Logging {
       // add up the hub scores of sources of incoming edges
       val authUpdates = hitsGraph.aggregateMessages[Double](
         ctx => ctx.sendToDst(ctx.srcAttr._2), _ + _, TripletFields.Src)
-      // make the authority scores 0
-      hitsGraph = hitsGraph.mapVertices { (id, attr) => (0.0, attr._2)}
-      hitsGraph = hitsGraph.joinVertices(authUpdates) {
-        (id, oldValue, msgSum) => (msgSum, oldValue._2)
+      hitsGraph = hitsGraph.outerJoinVertices(authUpdates) {
+        (id, oldValue, msgSumOpt) => (msgSumOpt.getOrElse(0.0), oldValue._2)
       }.cache()
 
       // add up the authority scores of destinations of outgoing edges
       val hubUpdates = hitsGraph.aggregateMessages[Double](
         ctx => ctx.sendToSrc(ctx.dstAttr._1), _ + _)
-      // make the hub scores 0
-      hitsGraph = hitsGraph.mapVertices { (id, attr) => (attr._1, 0.0)}
-      hitsGraph = hitsGraph.joinVertices(hubUpdates) {
-        (id, oldValue, msgSum) => (oldValue._1, msgSum)
+      hitsGraph = hitsGraph.outerJoinVertices(hubUpdates) {
+        (id, oldValue, msgSumOpt) => (oldValue._1, msgSumOpt.getOrElse(0.0))
       }
 
       logInfo(s"HITS finished iteration $iteration.")
